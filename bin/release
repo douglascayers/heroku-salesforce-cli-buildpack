@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+
+# Usage
+#   bin/release BUILD_DIR
+#
+# Arguments
+#   BUILD_DIR - directory where the app compiled code exists
+#
+# Description
+#   This script will only be run if present.
+#   This script returns a YAML formatted hash with two keys:
+#     addons: list of default addons to install
+#     default_process_types: hash of default Procfile entries
+#
+# https://devcenter.heroku.com/articles/buildpack-api#bin-release
+
+cat << EOF
+---
+addons: []
+default_process_types:
+EOF

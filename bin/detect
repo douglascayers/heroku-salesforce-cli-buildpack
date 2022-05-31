@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+# Usage
+#   bin/detect BUILD_DIR
+#
+# Arguments
+#   BUILD_DIR - directory where the app source code exists
+#
+# Description
+#   This script takes BUILD_DIR as a single argument and returns an exit code
+#   of 0 if the app present at BUILD_DIR can be serviced by this buildpack.
+#   If yes, the script must print a human-readable framework name to stdout.
+#
+# https://devcenter.heroku.com/articles/buildpack-api#bin-detect
+
+echo "Salesforce CLI"
+exit 0

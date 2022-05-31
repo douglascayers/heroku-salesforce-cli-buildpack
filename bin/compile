@@ -1,0 +1,119 @@
+#!/usr/bin/env bash
+
+# Usage
+#   bin/compile BUILD_DIR CACHE_DIR ENV_DIR
+#
+# Arguments
+#   BUILD_DIR - directory where the app source code exists
+#   CACHE_DIR - directory where cached results can be reused between builds
+#   ENV_DIR   - directory that contains a file for each configuration variable
+#
+# Description
+#   This script performs the buildpack transformation.
+#   The contents of CACHE_DIR will be persisted between builds.
+#   You can cache the results of long processes here to speed up future builds.
+#   You should create the CACHE_DIR directory if it doesn't exist.
+#   The application in BUILD_DIR along with all changes made by the compile
+#   script will be packaged into a slug.
+#   All output received on stdout from this script will be displayed to the user.
+#
+# https://devcenter.heroku.com/articles/buildpack-api#bin-compile
+
+### Configure environment
+
+set -o errexit  # always exit on error
+set -o pipefail # don't ignore exit codes when piping output
+unset GIT_DIR   # Avoid GIT_DIR leak from previous build steps
+
+### Configure directories
+
+BUILD_DIR=${1:-}
+CACHE_DIR=${2:-}
+ENV_DIR=${3:-}
+BUILDPACK_DIR="$(dirname $(dirname "$0"))"
+
+### Load dependencies
+
+source $BUILDPACK_DIR/lib/output.sh
+source $BUILDPACK_DIR/lib/environment.sh
+source $BUILDPACK_DIR/lib/sfdx.sh
+
+### Export Salesforce variables
+
+puts_header "Creating runtime environment"
+
+export_env_dir "${ENV_DIR}" "^(SALESFORCE_CLI_)"
+
+export SALESFORCE_CLI_OS=${SALESFORCE_CLI_OS:-$(get_os)}
+export SALESFORCE_CLI_ARCH=${SALESFORCE_CLI_ARCH:-$(get_arch)}
+export SALESFORCE_CLI_VERSION=${SALESFORCE_CLI_VERSION:-$(get_latest_version $SALESFORCE_CLI_OS $SALESFORCE_CLI_ARCH)}
+
+puts_info "SALESFORCE_CLI_VERSION=${SALESFORCE_CLI_VERSION}"
+puts_info "SALESFORCE_CLI_OS=${SALESFORCE_CLI_OS}"
+puts_info "SALESFORCE_CLI_ARCH=${SALESFORCE_CLI_ARCH}"
+
+### Download Salesforce CLI
+
+puts_header "Downloading Salesforce CLI"
+
+INSTALL_SALESFORCE_CLI_DIR="${BUILD_DIR}/.sfdx"
+INSTALL_SALESFORCE_CLI_FILE="${INSTALL_SALESFORCE_CLI_DIR}/sfdx-cli-installer"
+SALESFORCE_CLI_DOWNLOAD_URL="$(get_download_url $SALESFORCE_CLI_OS $SALESFORCE_CLI_ARCH $SALESFORCE_CLI_VERSION)"
+
+puts_info "${SALESFORCE_CLI_DOWNLOAD_URL}"
+
+rm -rf "${INSTALL_SALESFORCE_CLI_DIR}"
+mkdir -p "${INSTALL_SALESFORCE_CLI_DIR}"
+
+curl \
+  --silent \
+  --show-error \
+  --fail \
+  --retry 3 \
+  --retry-max-time 15 \
+  --location \
+  -o "${INSTALL_SALESFORCE_CLI_FILE}" \
+  "${SALESFORCE_CLI_DOWNLOAD_URL}" \
+  2>&1 | indent
+
+### Installing Salesforce CLI
+
+puts_header "Installing Salesforce CLI"
+
+tar \
+  --extract \
+  --gzip \
+  --file ${INSTALL_SALESFORCE_CLI_FILE} \
+  --directory ${INSTALL_SALESFORCE_CLI_DIR} \
+  --strip-components 1
+
+rm -rf "${INSTALL_SALESFORCE_CLI_FILE}"
+
+INSTALL_SALESFORCE_CLI_BIN_DIR="${INSTALL_SALESFORCE_CLI_DIR}/bin"
+chmod +x "${INSTALL_SALESFORCE_CLI_BIN_DIR}/sfdx"
+chmod +x "${INSTALL_SALESFORCE_CLI_BIN_DIR}/sf"
+
+# Make the cli available when dynos start
+# https://devcenter.heroku.com/articles/buildpack-api#profile-d-scripts
+mkdir -p "${BUILD_DIR}/.profile.d"
+cat > "${BUILD_DIR}/.profile.d/salesforce-cli.sh" << EOF
+export PATH="\$HOME/.sfdx/bin:\$PATH"
+EOF
+chmod +x "${BUILD_DIR}/.profile.d/salesforce-cli.sh"
+
+# Make the cli available to downstream buildpacks
+# https://devcenter.heroku.com/articles/buildpack-api#composing-multiple-buildpacks
+cat > "${BUILDPACK_DIR}/export" << EOF
+export PATH="\$HOME/.sfdx/bin:\$PATH"
+EOF
+chmod +x "${BUILDPACK_DIR}/export"
+
+# Make the cli available now to rest of the script
+PATH="${INSTALL_SALESFORCE_CLI_BIN_DIR}:$PATH"
+
+### Done
+
+sfdx --version | indent
+sf --version | indent
+
+puts_header "Successfully installed Salesforce CLI"
